@@ -27,15 +27,15 @@ Small logistics companies in Pakistan run on WhatsApp and gut feeling. A dispatc
 
 | Dashboard | Shipments |
 |---|---|
-| ![Dashboard](screenshots/dashboard.png) | ![Shipments](screenshots/shipments.png) |
+| ![Dashboard](screenshots/dashboard.jpg) | ![Shipments](screenshots/shipments.jpg) |
 
 | Task board | Agents |
 |---|---|
-| ![Tasks](screenshots/tasks.png) | ![Agents](screenshots/agents.png) |
+| ![Tasks](screenshots/tasks.jpg) | ![Agents](screenshots/agents.jpg) |
 
-<p align="center">
-  <img src="screenshots/mobile.png" width="300" alt="Mobile dashboard" />
-</p>
+| Login | Mobile |
+|---|---|
+| ![Login](screenshots/login.jpg) | ![Mobile](screenshots/mobile.jpg) |
 
 ## Tech stack
 
