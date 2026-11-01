@@ -1,6 +1,7 @@
-"""Demo data: four agents and a handful of shipments.
+"""Seed data: four agents and a handful of shipments.
 
-Idempotent — running it twice does not duplicate anything.
+Idempotent — running it twice does not duplicate anything. Called on startup
+when SEED_DEMO_DATA is true.
 """
 
 from __future__ import annotations
@@ -8,7 +9,6 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .database import SessionLocal, init_db
 from .models import Agent, AgentKind, Shipment
 
 AGENTS = [
