@@ -1,1 +1,0 @@
-"""Qafila application package."""

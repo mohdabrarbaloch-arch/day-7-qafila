@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Qafila — Logistics AI Agent Platform</title>
+  <meta name="description" content="AI agent orchestration for logistics and supply chains — dispatch, routing, inventory and demand agents." />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <!-- Auth view -->
+  <div id="auth-view" class="auth-view hidden">
+    <div class="auth-card">
+      <div class="brand">
+        <div class="brand-mark">ق</div>
+        <div>
+          <h1>Qafila</h1>
+          <p>Logistics AI Agent Platform</p>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="login">Login</button>
+        <button class="tab" data-tab="register">Register</button>
+      </div>
+      <form id="login-form" class="auth-form">
+        <label>Email<input type="email" id="login-email" required placeholder="you@company.pk" /></label>
+        <label>Password<input type="password" id="login-password" required placeholder="••••••••" /></label>
+        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+        <p class="hint">Demo: demo@qafila.pk / demo12345</p>
+      </form>
+      <form id="register-form" class="auth-form hidden">
+        <label>Full name<input type="text" id="reg-name" required placeholder="Ayesha Khan" /></label>
+        <label>Email<input type="email" id="reg-email" required placeholder="you@company.pk" /></label>
+        <label>Password (min 8, letters + digits)<input type="password" id="reg-password" required placeholder="••••••••" /></label>
+        <button type="submit" class="btn btn-primary btn-block">Create account</button>
+      </form>
+      <p id="auth-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <!-- App view -->
+  <div id="app-view" class="app-view hidden">
+    <header class="topbar">
+      <div class="brand small">
+        <div class="brand-mark">ق</div>
+        <div><h1>Qafila</h1><p id="user-name">—</p></div>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+        <button class="nav-btn" data-view="agents">Agents</button>
+        <button class="nav-btn" data-view="tasks">Tasks</button>
+        <button class="nav-btn" data-view="shipments">Shipments</button>
+        <button class="nav-btn" data-view="fleet">Fleet</button>
+      </nav>
+      <button id="logout-btn" class="btn btn-ghost">Logout</button>
+    </header>
+
+    <main class="content">
+      <!-- Dashboard -->
+      <section id="view-dashboard" class="view">
+        <h2>Operations overview</h2>
+        <div class="stat-grid" id="stat-grid"></div>
+        <div class="panel">
+          <h3>Recent activity</h3>
+          <ul id="event-list" class="event-list"></ul>
+        </div>
+      </section>
+
+      <!-- Agents -->
+      <section id="view-agents" class="view hidden">
+        <div class="view-head">
+          <h2>AI Agents</h2>
+          <button class="btn btn-primary" id="new-agent-btn">+ New agent</button>
+        </div>
+        <div id="agent-list" class="card-grid"></div>
+        <div id="agent-form-wrap" class="hidden">
+          <div class="panel">
+            <h3>Create agent</h3>
+            <form id="agent-form" class="form-grid">
+              <label>Name<input type="text" id="agent-name" required placeholder="Dispatcher" /></label>
+              <label>Kind
+                <select id="agent-kind">
+                  <option value="dispatch">Dispatch</option>
+                  <option value="route">Route</option>
+                  <option value="inventory">Inventory</option>
+                  <option value="demand">Demand</option>
+                </select>
+              </label>
+              <label class="span-2">Description<input type="text" id="agent-desc" placeholder="What this agent does" /></label>
+              <button type="submit" class="btn btn-primary">Create</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tasks -->
+      <section id="view-tasks" class="view hidden">
+        <div class="view-head">
+          <h2>Task Board</h2>
+          <button class="btn btn-primary" id="run-queue-btn">▶ Run queue</button>
+        </div>
+        <div class="panel">
+          <h3>New task</h3>
+          <form id="task-form" class="form-grid">
+            <label>Agent
+              <select id="task-agent"></select>
+            </label>
+            <label>Title<input type="text" id="task-title" required placeholder="Dispatch shipment QF-1234" /></label>
+            <label class="span-2">Input (JSON)<textarea id="task-input" rows="3" placeholder='{"weight_kg": 120, "origin": "Karachi", "destination": "Lahore"}'></textarea></label>
+            <button type="submit" class="btn btn-primary">Queue task</button>
+          </form>
+        </div>
+        <div id="task-list" class="task-list"></div>
+      </section>
+
+      <!-- Shipments -->
+      <section id="view-shipments" class="view hidden">
+        <div class="view-head">
+          <h2>Shipments</h2>
+          <button class="btn btn-primary" id="new-shipment-btn">+ New shipment</button>
+        </div>
+        <div id="shipment-form-wrap" class="hidden">
+          <div class="panel">
+            <h3>Create shipment</h3>
+            <form id="shipment-form" class="form-grid">
+              <label>Origin<input type="text" id="ship-origin" required placeholder="Karachi" /></label>
+              <label>Destination<input type="text" id="ship-destination" required placeholder="Lahore" /></label>
+              <label>Weight (kg)<input type="number" id="ship-weight" required min="1" placeholder="120" /></label>
+              <button type="submit" class="btn btn-primary">Create & auto-dispatch</button>
+            </form>
+          </div>
+        </div>
+        <div id="shipment-list" class="card-grid"></div>
+      </section>
+
+      <!-- Fleet -->
+      <section id="view-fleet" class="view hidden">
+        <div class="view-head">
+          <h2>Fleet</h2>
+          <button class="btn btn-primary" id="new-vehicle-btn">+ Add vehicle</button>
+        </div>
+        <div id="vehicle-form-wrap" class="hidden">
+          <div class="panel">
+            <h3>Add vehicle</h3>
+            <form id="vehicle-form" class="form-grid">
+              <label>Name<input type="text" id="veh-name" required placeholder="Van-02" /></label>
+              <label>Type
+                <select id="veh-type">
+                  <option value="bike">Bike</option>
+                  <option value="van" selected>Van</option>
+                  <option value="truck">Truck</option>
+                </select>
+              </label>
+              <label>Capacity (kg)<input type="number" id="veh-capacity" required min="1" value="800" /></label>
+              <label>Cost / km (PKR)<input type="number" id="veh-cost" required min="0" value="40" /></label>
+              <button type="submit" class="btn btn-primary">Add</button>
+            </form>
+          </div>
+        </div>
+        <div id="vehicle-list" class="card-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

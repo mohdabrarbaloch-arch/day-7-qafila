@@ -1,0 +1,15 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./qafila.db
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-me}
+      - SEED_DEMO_DATA=true
+    volumes:
+      - qafila_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  qafila_data:
