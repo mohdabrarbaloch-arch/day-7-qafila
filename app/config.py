@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 240
 
     seed_demo_data: bool = True
+    demo_email: str = "operator@qafila.pk"
+    # No default on purpose: the demo account is only created when a password
+    # is supplied, so a deployed instance never ships with a known login.
+    demo_password: str = ""
 
     @property
     def is_production(self) -> bool:

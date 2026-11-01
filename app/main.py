@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     settings.validate_for_runtime()
     init_db()
     if settings.seed_demo_data:
-        from .seed import seed
+        from .demo_data import seed
 
         db = SessionLocal()
         try:
