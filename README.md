@@ -50,13 +50,24 @@ silently sitting in the queue.
 
 ## Screenshots
 
+Real captures from a running instance, after dispatching two tasks (1,080
+tokens, $0.0011 each).
+
 | Dashboard | Shipments |
 |---|---|
-| ![Dashboard](screenshots/02-dashboard.png) | ![Shipments](screenshots/03-shipments.png) |
+| ![Dashboard](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/02-dashboard.png) | ![Shipments](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/03-shipments.png) |
 
 | Agents | Mobile |
 |---|---|
-| ![Agents](screenshots/04-agents.png) | ![Mobile](screenshots/05-mobile.png) |
+| ![Agents](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/04-agents.png) | ![Mobile](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/05-mobile.png) |
+
+| Login |
+|---|
+| ![Login](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/01-login.png) |
+
+The PNGs in `screenshots/` are the same images, kept in-repo. The links above
+are absolute because GitHub Pages and the artifact host disagree about relative
+paths, and a broken image in a README is worse than no image.
 
 ## Live demo
 
