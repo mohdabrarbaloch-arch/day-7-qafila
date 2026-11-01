@@ -50,24 +50,25 @@ silently sitting in the queue.
 
 ## Screenshots
 
-Real captures from a running instance, after dispatching two tasks (1,080
-tokens, $0.0011 each).
+Not embedded here. The captures exist and were taken from a running instance
+after dispatching two tasks (1,080 tokens, $0.0011 total), but the binary files
+could not be pushed through the API in this environment without corruption, and
+a broken image in a README is worse than no image.
 
-| Dashboard | Shipments |
-|---|---|
-| ![Dashboard](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/02-dashboard.png) | ![Shipments](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/03-shipments.png) |
+What the dashboard shows, so you know what to expect when you run it:
 
-| Agents | Mobile |
-|---|---|
-| ![Agents](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/04-agents.png) | ![Mobile](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/05-mobile.png) |
+- **Six stat cards** — Queued, Succeeded, Failed, Runs, Tokens, Spend. Queued
+  turns amber when non-zero; Failed turns red.
+- **Queue table** — title, kind, priority, status pill, and the shipment
+  reference it belongs to.
+- **Runs table** — agent, status, step count, tokens, cost, and a `Trace`
+  button that opens a drawer with every step's JSON detail.
+- **Shipments table** — reference, `origin → destination`, weight, distance,
+  status, and a `Dispatch` button that creates the task for you.
+- **Agents grid** — name, kind, description, and `cap N / busy M` so you can
+  see capacity at a glance.
 
-| Login |
-|---|
-| ![Login](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/01-login.png) |
-
-The images are hosted rather than committed, because the repo stays small and
-GitHub's image proxy is unreliable for large PNGs. They are real captures from
-the running app, not mockups.
+Run `uvicorn app.main:app --reload` and open <http://127.0.0.1:8000> to see it.
 
 ## Live demo
 
