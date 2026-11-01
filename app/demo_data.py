@@ -72,3 +72,20 @@ SHIPMENTS = [
         "deadline_hours": 20.0,
     },
 ]
+
+
+def seed(db: Session) -> dict[str, int]:
+    created = {"agents": 0, "shipments": 0}
+
+    for spec in AGENTS:
+        if db.scalar(select(Agent).where(Agent.name == spec["name"])) is None:
+            db.add(Agent(**spec))
+            created["agents"] += 1
+
+    for spec in SHIPMENTS:
+        if db.scalar(select(Shipment).where(Shipment.reference == spec["reference"])) is None:
+            db.add(Shipment(**spec))
+            created["shipments"] += 1
+
+    db.commit()
+    return created
