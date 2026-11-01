@@ -1,221 +1,343 @@
-"""API tests — auth, agents, tasks, fleet, shipments, dashboard."""
+"""API behaviour: auth, roles, validation, dispatch, metrics."""
+
+from __future__ import annotations
 
 
-class TestAuth:
-    def test_register_and_login(self, client):
-        r = client.post("/api/auth/register", json={"email": "a@b.pk", "name": "Ayaan", "password": "pass1234"})
-        assert r.status_code == 201
-        assert r.json()["access_token"]
-        r = client.post("/api/auth/login", json={"email": "a@b.pk", "password": "pass1234"})
-        assert r.status_code == 200
-        assert r.json()["user"]["email"] == "a@b.pk"
-
-    def test_duplicate_email_conflict(self, client, auth_headers):
-        r = client.post(
-            "/api/auth/register", json={"email": "tester@qafila.pk", "name": "Xara", "password": "pass1234"}
-        )
-        assert r.status_code == 409
-
-    def test_wrong_password_401(self, client):
-        client.post("/api/auth/register", json={"email": "c@d.pk", "name": "Cora", "password": "pass1234"})
-        r = client.post("/api/auth/login", json={"email": "c@d.pk", "password": "wrong123"})
-        assert r.status_code == 401
-
-    def test_weak_password_rejected(self, client):
-        r = client.post("/api/auth/register", json={"email": "e@f.pk", "name": "Eli", "password": "short"})
-        assert r.status_code == 422
-
-    def test_me_requires_token(self, client):
-        assert client.get("/api/auth/me").status_code == 401
-
-    def test_me_returns_user(self, client, auth_headers):
-        r = client.get("/api/auth/me", headers=auth_headers)
-        assert r.status_code == 200
-        assert r.json()["email"] == "tester@qafila.pk"
+def test_health_is_public(client):
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
 
 
-class TestAgents:
-    def test_create_and_list(self, client, auth_headers):
-        r = client.post("/api/agents", headers=auth_headers, json={"name": "Router", "kind": "route"})
-        assert r.status_code == 201
-        r = client.get("/api/agents", headers=auth_headers)
-        assert len(r.json()) == 1
-        assert r.json()[0]["kind"] == "route"
-
-    def test_invalid_kind_422(self, client, auth_headers):
-        r = client.post("/api/agents", headers=auth_headers, json={"name": "X", "kind": "teleport"})
-        assert r.status_code == 422
-
-    def test_agents_are_owner_scoped(self, client, auth_headers):
-        client.post("/api/agents", headers=auth_headers, json={"name": "Mine", "kind": "dispatch"})
-        other = client.post(
-            "/api/auth/register", json={"email": "other@qafila.pk", "name": "Omar", "password": "pass1234"}
-        )
-        other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
-        r = client.get("/api/agents", headers=other_headers)
-        assert r.json() == []
-
-    def test_update_status(self, client, auth_headers, demo_agent):
-        r = client.patch(f"/api/agents/{demo_agent['id']}", headers=auth_headers, json={"status": "running"})
-        assert r.status_code == 200
-        assert r.json()["status"] == "running"
-
-    def test_delete(self, client, auth_headers, demo_agent):
-        r = client.delete(f"/api/agents/{demo_agent['id']}", headers=auth_headers)
-        assert r.status_code == 204
-        assert client.get("/api/agents", headers=auth_headers).json() == []
-
-    def test_get_missing_404(self, client, auth_headers):
-        assert client.get("/api/agents/9999", headers=auth_headers).status_code == 404
+def test_register_creates_viewer_not_admin(client):
+    res = client.post(
+        "/api/auth/register",
+        json={"email": "new@test.pk", "password": "a-good-password"},
+    )
+    assert res.status_code == 201
+    assert res.json()["role"] == "viewer"
 
 
-class TestTasks:
-    def test_create_and_run_dispatch_task(self, client, auth_headers, demo_agent):
-        client.post(
-            "/api/fleet",
-            headers=auth_headers,
-            json={"name": "Van", "vehicle_type": "van", "capacity_kg": 800, "cost_per_km": 40},
-        )
-        r = client.post(
-            "/api/tasks",
-            headers=auth_headers,
-            json={
-                "agent_id": demo_agent["id"],
-                "title": "Dispatch to Lahore",
-                "input_data": {"weight_kg": 100, "origin": "Karachi", "destination": "Lahore"},
+def test_register_rejects_duplicate_email(client, admin_user):
+    res = client.post(
+        "/api/auth/register",
+        json={"email": "admin@test.pk", "password": "another-password"},
+    )
+    assert res.status_code == 409
+
+
+def test_register_rejects_short_password(client):
+    res = client.post("/api/auth/register", json={"email": "x@test.pk", "password": "short"})
+    assert res.status_code == 422
+
+
+def test_login_wrong_password_is_401(client, admin_user):
+    res = client.post(
+        "/api/auth/login", json={"email": "admin@test.pk", "password": "wrong-password"}
+    )
+    assert res.status_code == 401
+
+
+def test_login_unknown_user_gives_same_message(client):
+    res = client.post(
+        "/api/auth/login", json={"email": "ghost@test.pk", "password": "whatever-123"}
+    )
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Incorrect email or password."
+
+
+def test_me_requires_a_token(client):
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_me_returns_the_caller(client, auth_headers):
+    res = client.get("/api/auth/me", headers=auth_headers)
+    assert res.status_code == 200
+    assert res.json()["email"] == "admin@test.pk"
+
+
+def test_garbage_token_is_401(client):
+    res = client.get("/api/auth/me", headers={"Authorization": "Bearer not-a-jwt"})
+    assert res.status_code == 401
+
+
+def test_viewer_cannot_create_shipment(client, viewer_headers):
+    res = client.post(
+        "/api/shipments",
+        headers=viewer_headers,
+        json={
+            "reference": "QFL-V-1",
+            "origin_city": "Karachi",
+            "destination_city": "Lahore",
+            "weight_kg": 10,
+            "distance_km": 100,
+        },
+    )
+    assert res.status_code == 403
+
+
+def test_operator_can_create_shipment(client, auth_headers):
+    res = client.post(
+        "/api/shipments",
+        headers=auth_headers,
+        json={
+            "reference": "QFL-OK-1",
+            "origin_city": "Karachi",
+            "destination_city": "Lahore",
+            "weight_kg": 120,
+            "distance_km": 1240,
+            "deadline_hours": 48,
+        },
+    )
+    assert res.status_code == 201
+    assert res.json()["status"] == "created"
+
+
+def test_duplicate_shipment_reference_is_409(client, auth_headers):
+    payload = {
+        "reference": "QFL-DUP",
+        "origin_city": "Karachi",
+        "destination_city": "Quetta",
+        "weight_kg": 50,
+        "distance_km": 690,
+    }
+    assert client.post("/api/shipments", headers=auth_headers, json=payload).status_code == 201
+    assert client.post("/api/shipments", headers=auth_headers, json=payload).status_code == 409
+
+
+def test_shipment_rejects_negative_weight(client, auth_headers):
+    res = client.post(
+        "/api/shipments",
+        headers=auth_headers,
+        json={
+            "reference": "QFL-BAD",
+            "origin_city": "Karachi",
+            "destination_city": "Lahore",
+            "weight_kg": -5,
+            "distance_km": 100,
+        },
+    )
+    assert res.status_code == 422
+
+
+def test_shipment_rejects_bad_reference_characters(client, auth_headers):
+    res = client.post(
+        "/api/shipments",
+        headers=auth_headers,
+        json={
+            "reference": "QFL 1005!",
+            "origin_city": "Karachi",
+            "destination_city": "Lahore",
+            "weight_kg": 10,
+            "distance_km": 100,
+        },
+    )
+    assert res.status_code == 422
+
+
+def test_task_with_unknown_shipment_is_422(client, auth_headers):
+    res = client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={"title": "Dispatch ghost", "kind": "dispatcher", "shipment_id": "nope"},
+    )
+    assert res.status_code == 422
+
+
+def test_dispatch_runs_a_task_and_records_steps(client, auth_headers, seeded):
+    shipment = seeded["shipment"]
+    created = client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Dispatch QFL-TEST-1",
+            "kind": "dispatcher",
+            "priority": 1,
+            "shipment_id": shipment.id,
+        },
+    )
+    assert created.status_code == 201
+
+    result = client.post("/api/tasks/dispatch", headers=auth_headers)
+    assert result.status_code == 200
+    body = result.json()
+    assert len(body["dispatched"]) == 1
+
+    run = body["dispatched"][0]
+    assert run["status"] == "succeeded"
+    assert len(run["steps"]) >= 3
+    assert run["tokens_used"] > 0
+    assert run["cost_usd"] > 0
+
+
+def test_dispatch_marks_at_risk_shipment_delayed(client, auth_headers, seeded):
+    # 1240 km needs 26.8h; a 10h deadline cannot be met.
+    client.post(
+        "/api/shipments",
+        headers=auth_headers,
+        json={
+            "reference": "QFL-TIGHT",
+            "origin_city": "Karachi",
+            "destination_city": "Lahore",
+            "weight_kg": 100,
+            "distance_km": 1240,
+            "deadline_hours": 10,
+        },
+    )
+    shipments = client.get("/api/shipments", headers=auth_headers).json()
+    tight = next(s for s in shipments if s["reference"] == "QFL-TIGHT")
+
+    client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={"title": "Dispatch tight", "kind": "dispatcher", "shipment_id": tight["id"]},
+    )
+    client.post("/api/tasks/dispatch", headers=auth_headers)
+
+    after = client.get(f"/api/shipments/{tight['id']}", headers=auth_headers).json()
+    assert after["status"] == "delayed"
+
+
+def test_dispatch_skips_when_no_agent_of_that_kind(client, auth_headers, seeded):
+    # Remove every route_optimizer by disabling them.
+    for agent in seeded["agents"]:
+        if agent.kind.value == "route_optimizer":
+            client.patch(f"/api/agents/{agent.id}/toggle", headers=auth_headers)
+
+    client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={"title": "Optimise", "kind": "route_optimizer", "shipment_id": seeded["shipment"].id},
+    )
+    body = client.post("/api/tasks/dispatch", headers=auth_headers).json()
+    assert body["dispatched"] == []
+    assert any("disabled" in s["reason"] for s in body["skipped"])
+
+
+def test_dependency_blocks_dispatch_until_parent_succeeds(client, auth_headers, seeded):
+    parent = client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={"title": "Parent", "kind": "dispatcher", "shipment_id": seeded["shipment"].id},
+    ).json()
+
+    child = client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Child",
+            "kind": "route_optimizer",
+            "shipment_id": seeded["shipment"].id,
+            "depends_on_id": parent["id"],
+        },
+    ).json()
+
+    # First dispatch: parent runs, child is still blocked.
+    first = client.post("/api/tasks/dispatch", headers=auth_headers).json()
+    assert len(first["dispatched"]) == 1
+    assert any(s["task_id"] == child["id"] for s in first["skipped"])
+
+    # Second dispatch: parent succeeded, so the child is now runnable.
+    second = client.post("/api/tasks/dispatch", headers=auth_headers).json()
+    assert len(second["dispatched"]) == 1
+
+
+def test_metrics_reflect_completed_runs(client, auth_headers, seeded):
+    client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={"title": "Dispatch", "kind": "dispatcher", "shipment_id": seeded["shipment"].id},
+    )
+    client.post("/api/tasks/dispatch", headers=auth_headers)
+
+    metrics = client.get("/api/metrics", headers=auth_headers).json()
+    assert metrics["runs_total"] == 1
+    assert metrics["tasks_by_status"]["succeeded"] == 1
+    assert metrics["tokens_used"] > 0
+
+
+def test_audit_log_is_admin_only(client, auth_headers, viewer_headers):
+    assert client.get("/api/audit", headers=viewer_headers).status_code == 403
+    assert client.get("/api/audit", headers=auth_headers).status_code == 200
+
+
+def test_audit_records_shipment_creation(client, auth_headers):
+    client.post(
+        "/api/shipments",
+        headers=auth_headers,
+        json={
+            "reference": "QFL-AUDIT",
+            "origin_city": "Karachi",
+            "destination_city": "Lahore",
+            "weight_kg": 10,
+            "distance_km": 100,
+        },
+    )
+    events = client.get("/api/audit", headers=auth_headers).json()
+    assert any(e["action"] == "shipment.created" for e in events)
+
+
+def test_agent_creation_requires_admin(client, viewer_headers):
+    res = client.post(
+        "/api/agents",
+        headers=viewer_headers,
+        json={"name": "Naya", "kind": "dispatcher"},
+    )
+    assert res.status_code == 403
+
+
+def test_duplicate_agent_name_is_409(client, auth_headers, seeded):
+    res = client.post(
+        "/api/agents",
+        headers=auth_headers,
+        json={"name": "Tarmeem", "kind": "dispatcher"},
+    )
+    assert res.status_code == 409
+
+
+def test_exception_task_triages_incident(client, auth_headers, seeded):
+    client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Triage accident",
+            "kind": "exception_handler",
+            "shipment_id": seeded["shipment"].id,
+            "payload": {"description": "Driver reports an accident near Sukkur"},
+        },
+    )
+    body = client.post("/api/tasks/dispatch", headers=auth_headers).json()
+    run = body["dispatched"][0]
+    classify = next(s for s in run["steps"] if s["step"] == "classify")
+    assert classify["detail"]["severity"] == "critical"
+
+
+def test_inventory_auditor_reports_shortage(client, auth_headers, seeded):
+    client.post(
+        "/api/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Audit stock",
+            "kind": "inventory_auditor",
+            "payload": {
+                "items": [
+                    {"sku": "A-1", "on_hand": 5, "required": 10},
+                    {"sku": "B-2", "on_hand": 20, "required": 20},
+                ]
             },
-        )
-        assert r.status_code == 201
-        assert r.json()["status"] == "queued"
-        r = client.post("/api/tasks/run", headers=auth_headers)
-        assert r.json()["ran"] == 1
-        tasks = client.get("/api/tasks", headers=auth_headers).json()
-        assert tasks[0]["status"] == "done"
-        assert tasks[0]["output_data"]["ok"] is True
-
-    def test_task_requires_owned_agent(self, client, auth_headers):
-        r = client.post(
-            "/api/tasks", headers=auth_headers, json={"agent_id": 9999, "title": "Ghost task", "input_data": {}}
-        )
-        assert r.status_code == 404
-
-    def test_failed_task_records_error(self, client, auth_headers, demo_agent):
-        client.post(
-            "/api/tasks",
-            headers=auth_headers,
-            json={"agent_id": demo_agent["id"], "title": "Bad", "input_data": {"weight_kg": 0}},
-        )
-        client.post("/api/tasks/run", headers=auth_headers)
-        tasks = client.get("/api/tasks", headers=auth_headers).json()
-        assert tasks[0]["status"] == "failed"
-        assert tasks[0]["error"]
+        },
+    )
+    body = client.post("/api/tasks/dispatch", headers=auth_headers).json()
+    run = body["dispatched"][0]
+    compare = next(s for s in run["steps"] if s["step"] == "compare_stock")
+    assert compare["detail"]["shortages"] == 1
 
 
-class TestFleet:
-    def test_create_vehicle(self, client, auth_headers):
-        r = client.post(
-            "/api/fleet",
-            headers=auth_headers,
-            json={"name": "Truck-1", "vehicle_type": "truck", "capacity_kg": 5000, "cost_per_km": 90},
-        )
-        assert r.status_code == 201
-        assert r.json()["status"] == "available"
-
-    def test_invalid_type_422(self, client, auth_headers):
-        r = client.post(
-            "/api/fleet",
-            headers=auth_headers,
-            json={"name": "X", "vehicle_type": "plane", "capacity_kg": 1, "cost_per_km": 1},
-        )
-        assert r.status_code == 422
+def test_task_runs_endpoint_404s_for_unknown_task(client, auth_headers):
+    assert client.get("/api/tasks/nope/runs", headers=auth_headers).status_code == 404
 
 
-class TestShipments:
-    def test_create_auto_dispatch(self, client, auth_headers):
-        client.post(
-            "/api/fleet",
-            headers=auth_headers,
-            json={"name": "Van", "vehicle_type": "van", "capacity_kg": 800, "cost_per_km": 40},
-        )
-        r = client.post(
-            "/api/shipments",
-            headers=auth_headers,
-            json={"origin": "Karachi", "destination": "Lahore", "weight_kg": 100},
-        )
-        assert r.status_code == 201
-        s = r.json()
-        assert s["tracking_code"].startswith("QF-")
-        assert s["status"] == "assigned"
-        assert s["vehicle_id"] is not None
-        assert s["cost"] > 0
-
-    def test_advance_lifecycle(self, client, auth_headers):
-        client.post(
-            "/api/fleet",
-            headers=auth_headers,
-            json={"name": "Van", "vehicle_type": "van", "capacity_kg": 800, "cost_per_km": 40},
-        )
-        s = client.post(
-            "/api/shipments",
-            headers=auth_headers,
-            json={"origin": "Karachi", "destination": "Hyderabad", "weight_kg": 50},
-        ).json()
-        r = client.post(f"/api/shipments/{s['id']}/advance", headers=auth_headers)
-        assert r.json()["status"] == "in_transit"
-        r = client.post(f"/api/shipments/{s['id']}/advance", headers=auth_headers)
-        assert r.json()["status"] == "delivered"
-        # vehicle freed
-        vehicles = client.get("/api/fleet", headers=auth_headers).json()
-        assert vehicles[0]["status"] == "available"
-
-    def test_advance_delivered_rejected(self, client, auth_headers):
-        client.post(
-            "/api/fleet",
-            headers=auth_headers,
-            json={"name": "Van", "vehicle_type": "van", "capacity_kg": 800, "cost_per_km": 40},
-        )
-        s = client.post(
-            "/api/shipments",
-            headers=auth_headers,
-            json={"origin": "Karachi", "destination": "Hyderabad", "weight_kg": 50},
-        ).json()
-        for _ in range(2):
-            client.post(f"/api/shipments/{s['id']}/advance", headers=auth_headers)
-        r = client.post(f"/api/shipments/{s['id']}/advance", headers=auth_headers)
-        assert r.status_code == 400
-
-    def test_shipment_owner_scoped(self, client, auth_headers):
-        s = client.post(
-            "/api/shipments",
-            headers=auth_headers,
-            json={"origin": "Karachi", "destination": "Hyderabad", "weight_kg": 10},
-        ).json()
-        other = client.post("/api/auth/register", json={"email": "z@qafila.pk", "name": "Zara", "password": "pass1234"})
-        other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
-        assert client.get(f"/api/shipments/{s['id']}", headers=other_headers).status_code == 404
-
-
-class TestDashboard:
-    def test_dashboard_counts(self, client, auth_headers, demo_agent):
-        client.post(
-            "/api/fleet",
-            headers=auth_headers,
-            json={"name": "Van", "vehicle_type": "van", "capacity_kg": 800, "cost_per_km": 40},
-        )
-        client.post(
-            "/api/shipments",
-            headers=auth_headers,
-            json={"origin": "Karachi", "destination": "Lahore", "weight_kg": 100},
-        )
-        d = client.get("/api/dashboard", headers=auth_headers).json()
-        assert d["shipments_total"] == 1
-        assert d["shipments_in_transit"] == 1
-        assert d["fleet_available"] == 0
-        assert d["fleet_on_route"] == 1
-        assert d["agents_total"] == 1
-        assert len(d["recent_events"]) >= 1
-
-    def test_health(self, client):
-        r = client.get("/api/health")
-        assert r.status_code == 200
-        assert r.json()["status"] == "ok"
+def test_security_headers_are_present(client):
+    res = client.get("/api/health")
+    assert res.headers["X-Content-Type-Options"] == "nosniff"
+    assert res.headers["X-Frame-Options"] == "DENY"

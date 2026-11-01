@@ -56,6 +56,8 @@ def create_task(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Dependency task '{payload.depends_on_id}' does not exist.",
             )
+        if dependency.id == payload.depends_on_id and dependency.status is TaskStatus.succeeded:
+            pass  # a completed dependency is a valid starting point
 
     task = Task(
         title=payload.title,
