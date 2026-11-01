@@ -37,3 +37,38 @@ AGENTS = [
         "max_concurrency": 4,
     },
 ]
+
+SHIPMENTS = [
+    {
+        "reference": "QFL-1001",
+        "origin_city": "Karachi",
+        "destination_city": "Lahore",
+        "weight_kg": 320.0,
+        "distance_km": 1_240.0,
+        "deadline_hours": 30.0,
+    },
+    {
+        "reference": "QFL-1002",
+        "origin_city": "Karachi",
+        "destination_city": "Hyderabad",
+        "weight_kg": 45.0,
+        "distance_km": 165.0,
+        "deadline_hours": 12.0,
+    },
+    {
+        "reference": "QFL-1003",
+        "origin_city": "Lahore",
+        "destination_city": "Islamabad",
+        "weight_kg": 1_800.0,
+        "distance_km": 375.0,
+        "deadline_hours": 24.0,
+    },
+    {
+        "reference": "QFL-1004",
+        "origin_city": "Quetta",
+        "destination_city": "Karachi",
+        "weight_kg": 90.0,
+        "distance_km": 690.0,
+        "deadline_hours": 20.0,
+    },
+]
