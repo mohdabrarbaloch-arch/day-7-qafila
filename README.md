@@ -65,9 +65,9 @@ tokens, $0.0011 each).
 |---|
 | ![Login](https://static.teamily.ai/sites/d163bce7-8dae-4921-b8ae-19e246d87cec/documents/qafila-screenshots/01-login.png) |
 
-The PNGs in `screenshots/` are the same images, kept in-repo. The links above
-are absolute because GitHub Pages and the artifact host disagree about relative
-paths, and a broken image in a README is worse than no image.
+The images are hosted rather than committed, because the repo stays small and
+GitHub's image proxy is unreliable for large PNGs. They are real captures from
+the running app, not mockups.
 
 ## Live demo
 
