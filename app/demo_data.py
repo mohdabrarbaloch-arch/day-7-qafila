@@ -3,8 +3,10 @@
 Idempotent — running it twice does not duplicate anything. Called on startup
 when SEED_DEMO_DATA is true.
 
-The demo user is only created when DEMO_PASSWORD is set. A deployed instance
-with an empty DEMO_PASSWORD therefore has no known login at all.
+The demo user is only created when a password is available. In development
+that falls back to the password the README documents, so a fresh clone can log
+in immediately. In production it comes from DEMO_PASSWORD only, so a deployed
+instance never ships with a known login.
 """
 
 from __future__ import annotations
@@ -93,13 +95,14 @@ def seed(db: Session) -> dict[str, int]:
             created["shipments"] += 1
 
     settings = get_settings()
-    if settings.demo_password:
+    demo_password = settings.effective_demo_password
+    if demo_password:
         email = settings.demo_email.lower()
         if db.scalar(select(User).where(User.email == email)) is None:
             db.add(
                 User(
                     email=email,
-                    password_hash=hash_password(settings.demo_password),
+                    password_hash=hash_password(demo_password),
                     role=Role.admin,
                 )
             )

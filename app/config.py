@@ -8,6 +8,7 @@ development value so `uvicorn app.main:app` works out of the box, but
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import ClassVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,6 +34,18 @@ class Settings(BaseSettings):
     # No default on purpose: the demo account is only created when a password
     # is supplied, so a deployed instance never ships with a known login.
     demo_password: str = ""
+
+    # The password the README documents for local development. It is only ever
+    # used outside production, so the documented login works after a fresh
+    # clone while a deployed instance still has no known credentials.
+    DEV_DEMO_PASSWORD: ClassVar[str] = "qafila-demo-2026"
+
+    @property
+    def effective_demo_password(self) -> str:
+        """The password to seed the demo account with, or "" to skip it."""
+        if self.is_production:
+            return self.demo_password
+        return self.demo_password or self.DEV_DEMO_PASSWORD
 
     @property
     def is_production(self) -> bool:
