@@ -1,11 +1,25 @@
+# Python
 __pycache__/
 *.py[cod]
-*.db
-.env
+*.egg-info/
 .venv/
 venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-node_modules/
+
+# Database
+*.db
+*.sqlite3
+
+# Secrets
+.env
+.env.local
+
+# OS / editor
 .DS_Store
+.idea/
+.vscode/
+
+# Deploy
+.vercel/

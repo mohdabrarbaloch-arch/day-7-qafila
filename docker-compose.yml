@@ -1,15 +1,35 @@
 services:
-  api:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: qafila
+      POSTGRES_PASSWORD: qafila
+      POSTGRES_DB: qafila
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qafila -d qafila"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
     build: .
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:///./qafila.db
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-me}
-      - SEED_DEMO_DATA=true
-    volumes:
-      - qafila_data:/app/data
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DATABASE_URL: postgresql+psycopg://qafila:qafila@db:5432/qafila
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-secret-change-me}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-240}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  qafila_data:
+  pgdata:

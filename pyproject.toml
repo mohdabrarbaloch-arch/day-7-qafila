@@ -1,21 +1,25 @@
 [project]
 name = "qafila"
 version = "1.0.0"
-description = "Logistics AI agent orchestration platform — dispatch, routing, inventory and demand agents."
+description = "Logistics agent orchestration platform"
 requires-python = ">=3.11"
 
 [tool.ruff]
-line-length = 120
+line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "SIM"]
-ignore = ["B008"]  # FastAPI Depends() in defaults is the required idiom
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "W", "PIE", "PT"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PT011"]
 
 [tool.black]
-line-length = 120
+line-length = 100
 target-version = ["py311"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
