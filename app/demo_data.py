@@ -1,7 +1,10 @@
-"""Seed data: four agents and a handful of shipments.
+"""Seed data: four agents, a handful of shipments, and the demo account.
 
 Idempotent — running it twice does not duplicate anything. Called on startup
 when SEED_DEMO_DATA is true.
+
+The demo user is only created when DEMO_PASSWORD is set. A deployed instance
+with an empty DEMO_PASSWORD therefore has no known login at all.
 """
 
 from __future__ import annotations
@@ -9,7 +12,9 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Agent, AgentKind, Shipment
+from .config import get_settings
+from .models import Agent, AgentKind, Role, Shipment, User
+from .security import hash_password
 
 AGENTS = [
     {
@@ -75,7 +80,7 @@ SHIPMENTS = [
 
 
 def seed(db: Session) -> dict[str, int]:
-    created = {"agents": 0, "shipments": 0}
+    created = {"agents": 0, "shipments": 0, "users": 0}
 
     for spec in AGENTS:
         if db.scalar(select(Agent).where(Agent.name == spec["name"])) is None:
@@ -86,6 +91,19 @@ def seed(db: Session) -> dict[str, int]:
         if db.scalar(select(Shipment).where(Shipment.reference == spec["reference"])) is None:
             db.add(Shipment(**spec))
             created["shipments"] += 1
+
+    settings = get_settings()
+    if settings.demo_password:
+        email = settings.demo_email.lower()
+        if db.scalar(select(User).where(User.email == email)) is None:
+            db.add(
+                User(
+                    email=email,
+                    password_hash=hash_password(settings.demo_password),
+                    role=Role.admin,
+                )
+            )
+            created["users"] += 1
 
     db.commit()
     return created
