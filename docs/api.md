@@ -1,110 +1,357 @@
-# API Reference
+# API reference
 
-Base URL: `/api`. All endpoints except `auth/register`, `auth/login` and `health` require a Bearer token.
+Base URL: `http://127.0.0.1:8000`
 
-## Auth
+All endpoints except `/api/health`, `/api/auth/register` and `/api/auth/login`
+require `Authorization: Bearer <token>`.
 
-### POST /auth/register
-Create an account. Returns a token and the user.
+Interactive docs are served at `/docs` (Swagger) and `/redoc`.
 
-```json
-{"email": "you@company.pk", "name": "Ayesha Khan", "password": "secret123"}
-```
-
-- `201` — created
-- `409` — email already registered
-- `422` — validation error (password must be ≥8 chars with letters and digits)
-
-### POST /auth/login
-```json
-{"email": "you@company.pk", "password": "secret123"}
-```
-- `200` — `{access_token, token_type, user}`
-- `401` — invalid credentials
-
-### GET /auth/me
-Returns the current user. `401` without a token.
-
-## Agents
-
-### GET /agents
-List the current user's agents.
-
-### POST /agents
-```json
-{"name": "Dispatcher", "kind": "dispatch", "description": "optional", "config": {}}
-```
-`kind` must be one of `dispatch | route | inventory | demand`. `201` on success, `422` otherwise.
-
-### GET /agents/kinds
-Returns the four agent kinds with descriptions.
-
-### GET /agents/{id} · PATCH /agents/{id} · DELETE /agents/{id}
-Update accepts `name`, `description`, `status` (`idle|running|paused`), `config`. `404` if not found or not owned.
-
-## Tasks
-
-### GET /tasks
-List the user's tasks, newest first (max 100).
-
-### POST /tasks
-```json
-{"agent_id": 1, "title": "Dispatch to Lahore", "input_data": {"weight_kg": 100, "origin": "Karachi", "destination": "Lahore"}}
-```
-`404` if the agent doesn't exist or isn't yours.
-
-### POST /tasks/run
-Executes queued tasks oldest-first. Returns `{"ran": N}`.
-
-### GET /tasks/{id}
-`404` if not found or not owned.
-
-## Fleet
-
-### GET /fleet · POST /fleet
-```json
-{"name": "Van-02", "vehicle_type": "van", "capacity_kg": 800, "cost_per_km": 40}
-```
-`vehicle_type` must be `bike | van | truck`. `201` on success.
-
-### PATCH /fleet/{id}
-Accepts `status` (`available|on_route|maintenance`) and `location`.
-
-### DELETE /fleet/{id}
-`204` on success.
-
-## Shipments
-
-### GET /shipments · POST /shipments
-```json
-{"origin": "Karachi", "destination": "Lahore", "weight_kg": 100}
-```
-Creating a shipment runs the dispatch agent: on success the response has `status: "assigned"`, a `vehicle_id`, `eta_hours` and `cost`. If no vehicle fits, `status` stays `created`.
-
-### GET /shipments/{id}
-`404` if not found or not owned.
-
-### POST /shipments/{id}/advance
-Moves `created → assigned → in_transit → delivered`. `400` if already delivered. Frees the vehicle on delivery.
-
-## Dashboard
-
-### GET /dashboard
-```json
-{
-  "shipments_total": 3, "shipments_in_transit": 1, "shipments_delivered": 1,
-  "agents_total": 4, "agents_running": 0,
-  "tasks_queued": 2, "tasks_done": 5,
-  "fleet_available": 2, "fleet_on_route": 1,
-  "recent_events": [{"id": 1, "kind": "dispatch", "message": "...", "created_at": "..."}]
-}
-```
+---
 
 ## Health
 
-### GET /health
-`{"status": "ok", "app": "...", "version": "1.0.0"}`
+### `GET /api/health`
 
-## Errors
+No auth. Returns:
 
-All errors return JSON: `{"detail": "message"}`. Status codes: `400` bad request, `401` unauthenticated, `403` forbidden, `404` not found, `409` conflict, `422` validation, `429` rate limited.
+```json
+{"status": "ok", "app": "Qafila", "version": "1.0.0"}
+```
+
+---
+
+## Auth
+
+### `POST /api/auth/register`
+
+Creates a `viewer`. There is no way to request a higher role.
+
+```json
+{"email": "new@example.com", "password": "at-least-8-chars"}
+```
+
+`201 Created`
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "bearer",
+  "role": "viewer"
+}
+```
+
+| Status | When |
+|---|---|
+| `409` | Email already registered |
+| `422` | Password under 8 chars, over 72 bytes, or invalid email |
+
+### `POST /api/auth/login`
+
+```json
+{"email": "operator@qafila.pk", "password": "qafila-demo-2026"}
+```
+
+`200 OK` — same shape as register.
+
+`401` for both unknown email and wrong password, with the identical body:
+
+```json
+{"detail": "Incorrect email or password."}
+```
+
+That is intentional. Different messages would let an attacker enumerate accounts.
+
+### `GET /api/auth/me`
+
+`200 OK`
+
+```json
+{
+  "id": "0d731aa28c6647c48110989371b569e6",
+  "email": "operator@qafila.pk",
+  "role": "admin",
+  "created_at": "2026-11-01T18:58:12.441Z"
+}
+```
+
+`401` if the token is missing, malformed, expired, or the user was deleted.
+
+---
+
+## Agents
+
+### `GET /api/agents`
+
+Any authenticated role. Sorted by name.
+
+```json
+[
+  {
+    "id": "a1b2c3...",
+    "name": "Ginti",
+    "kind": "inventory_auditor",
+    "description": "Compares a manifest against stock on hand and raises shortages.",
+    "max_concurrency": 2,
+    "enabled": true,
+    "created_at": "2026-11-01T18:58:12.441Z"
+  }
+]
+```
+
+`kind` is one of `dispatcher`, `route_optimizer`, `inventory_auditor`,
+`exception_handler`.
+
+### `POST /api/agents`
+
+**Admin only.** `403` for operator and viewer.
+
+```json
+{
+  "name": "Naya",
+  "kind": "dispatcher",
+  "description": "Optional, up to 2000 chars.",
+  "max_concurrency": 2
+}
+```
+
+`201 Created` · `409` if the name is taken · `422` if `max_concurrency` is
+outside 1–16.
+
+### `PATCH /api/agents/{agent_id}/toggle`
+
+**Admin only.** Flips `enabled` and returns the agent. `404` if unknown.
+
+A disabled agent is skipped at dispatch with an explicit reason, not silently
+ignored.
+
+---
+
+## Shipments
+
+### `GET /api/shipments`
+
+Query params: `status` (optional filter), `limit` (1–500, default 100).
+
+```json
+[
+  {
+    "id": "0d731aa28c6647c48110989371b569e6",
+    "reference": "QFL-1001",
+    "origin_city": "Karachi",
+    "destination_city": "Lahore",
+    "weight_kg": 320.0,
+    "distance_km": 1240.0,
+    "status": "in_transit",
+    "deadline_hours": 30.0,
+    "created_at": "2026-11-01T18:58:12.441Z"
+  }
+]
+```
+
+`status` is one of `created`, `in_transit`, `delayed`, `delivered`, `cancelled`.
+
+### `POST /api/shipments`
+
+**Operator or admin.**
+
+```json
+{
+  "reference": "QFL-1005",
+  "origin_city": "Karachi",
+  "destination_city": "Lahore",
+  "weight_kg": 120,
+  "distance_km": 1240,
+  "deadline_hours": 48
+}
+```
+
+`201 Created` · `409` duplicate reference · `403` viewer · `422` validation.
+
+Validation bounds: `reference` 3–40 chars matching `^[A-Za-z0-9\-_]+$`,
+`weight_kg` > 0 and ≤ 40,000, `distance_km` > 0 and ≤ 20,000,
+`deadline_hours` > 0 and ≤ 720.
+
+### `GET /api/shipments/{shipment_id}`
+
+`200 OK` or `404`.
+
+---
+
+## Tasks
+
+### `GET /api/tasks`
+
+Query params: `status`, `limit` (1–500, default 100).
+
+```json
+[
+  {
+    "id": "029605582ffc489b8f09816819af9f43",
+    "title": "Dispatch QFL-1001",
+    "kind": "dispatcher",
+    "status": "succeeded",
+    "priority": 1,
+    "payload": {"output": {"freight_pkr": 7543.82, "transit_hours": 26.8, "urgency": 0.893}},
+    "shipment_id": "0d731aa28c6647c48110989371b569e6",
+    "agent_id": "a1b2c3...",
+    "depends_on_id": null,
+    "created_at": "2026-11-01T19:02:11.102Z",
+    "updated_at": "2026-11-01T19:02:11.204Z"
+  }
+]
+```
+
+`status` is one of `queued`, `running`, `succeeded`, `failed`, `blocked`,
+`cancelled`.
+
+### `POST /api/tasks`
+
+**Operator or admin.**
+
+```json
+{
+  "title": "Optimise route QFL-1001",
+  "kind": "route_optimizer",
+  "priority": 2,
+  "shipment_id": "0d731aa28c6647c48110989371b569e6",
+  "depends_on_id": "029605582ffc489b8f09816819af9f43",
+  "payload": {}
+}
+```
+
+`201 Created` · `422` if `shipment_id` or `depends_on_id` does not exist.
+
+`priority` is 1–10, where 1 runs first.
+
+### `POST /api/tasks/dispatch`
+
+**Operator or admin.** Query param `max_tasks` (1–50, default 10).
+
+Drains the runnable queue. Returns what ran and what did not, with reasons.
+
+```json
+{
+  "dispatched": [
+    {
+      "id": "run-id",
+      "task_id": "029605582ffc489b8f09816819af9f43",
+      "agent_id": "a1b2c3...",
+      "status": "succeeded",
+      "steps": [
+        {"step": "load_shipment", "at": "2026-11-01T19:02:11.150Z", "detail": {"shipment_id": "0d73..."}},
+        {"step": "compute_plan", "at": "2026-11-01T19:02:11.180Z",
+         "detail": {"freight_pkr": 7543.82, "transit_hours": 26.8, "slack_hours": 3.2, "urgency": 0.893}},
+        {"step": "assign_carrier", "at": "2026-11-01T19:02:11.204Z", "detail": {"status": "in_transit"}}
+      ],
+      "tokens_used": 540,
+      "cost_usd": 0.00108,
+      "error": null,
+      "started_at": "2026-11-01T19:02:11.102Z",
+      "finished_at": "2026-11-01T19:02:11.204Z"
+    }
+  ],
+  "skipped": [
+    {"task_id": "child-task-id", "reason": "Dependency is queued, not succeeded."}
+  ],
+  "message": "Dispatched 1 task(s); 1 left in the queue."
+}
+```
+
+Skip reasons you will actually see:
+
+- `Dependency is queued, not succeeded.`
+- `Dependency is failed, not succeeded.`
+- `Dependency task no longer exists.`
+- `All 'dispatcher' agents are at capacity: Tarmeem (3/3).`
+- `All 'dispatcher' agents are disabled: Tarmeem.`
+- `No agent registered for kind 'route_optimizer'.`
+
+### `GET /api/tasks/{task_id}/runs`
+
+All runs for a task, newest first. `404` if the task does not exist.
+
+### `GET /api/runs`
+
+Query param `limit` (1–200, default 50). Same run shape as above.
+
+---
+
+## Observability
+
+### `GET /api/metrics`
+
+Any authenticated role.
+
+```json
+{
+  "tasks_by_status": {
+    "queued": 0, "running": 0, "succeeded": 2,
+    "failed": 0, "blocked": 0, "cancelled": 0
+  },
+  "runs_total": 2,
+  "runs_failed": 0,
+  "tokens_used": 1080,
+  "cost_usd": 0.00216,
+  "agents_busy": {},
+  "shipments_by_status": {
+    "created": 3, "in_transit": 1, "delayed": 0,
+    "delivered": 0, "cancelled": 0
+  }
+}
+```
+
+Every status key is present even at zero, so a dashboard does not have to
+handle missing keys.
+
+### `GET /api/audit`
+
+**Admin only.** `403` otherwise. Query param `limit` (1–500, default 100).
+
+```json
+[
+  {
+    "id": "evt-id",
+    "actor_id": "0d731aa28c6647c48110989371b569e6",
+    "action": "shipment.created",
+    "entity_type": "shipment",
+    "entity_id": "0d731aa28c6647c48110989371b569e6",
+    "detail": {"reference": "QFL-1001"},
+    "created_at": "2026-11-01T18:58:12.441Z"
+  }
+]
+```
+
+Actions recorded: `user.registered`, `agent.created`, `agent.toggled`,
+`shipment.created`, `task.created`, `tasks.dispatched`.
+
+---
+
+## Error format
+
+Every error is `{"detail": "..."}`. Validation errors from Pydantic use
+FastAPI's standard list form:
+
+```json
+{
+  "detail": [
+    {
+      "type": "greater_than",
+      "loc": ["body", "weight_kg"],
+      "msg": "Input should be greater than 0",
+      "input": -5
+    }
+  ]
+}
+```
+
+Engine-level `ValueError`s are caught by a handler and returned as `422` with a
+plain string `detail`, so a bad payload never surfaces as a 500.
+
+## Rate limiting
+
+240 requests per minute per client IP, per process. Exceeding it returns `429`
+with a `Retry-After` header.
+
+**Limitation:** the counter is in-process. Running N uvicorn workers allows N
+times the configured rate. See [usage.md](usage.md#known-limitations).

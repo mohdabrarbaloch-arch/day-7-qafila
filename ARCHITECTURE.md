@@ -1,63 +1,151 @@
-# Qafila — Architecture
+# Architecture — Qafila
 
-## System overview
+Qafila is a control plane for logistics agents. The point is not that agents
+exist; it is that every decision an agent makes is **readable, priced, and
+replayable**. A dispatcher who cannot explain why a shipment was flagged is a
+dispatcher nobody trusts.
+
+## System diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Browser (SPA)                        │
-│   Dashboard · Agents · Tasks · Shipments · Fleet            │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ REST + JWT (Bearer)
-┌──────────────────────────▼──────────────────────────────────┐
-│                     FastAPI application                     │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │
-│  │  auth    │  │  agents  │  │  tasks   │  │  shipments  │  │
-│  │  router  │  │  router  │  │  router  │  │   router    │  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬──────┘  │
-│       │             │             │               │         │
-│  ┌────▼─────────────▼─────────────▼───────────────▼──────┐  │
-│  │              Engine (pure, deterministic)             │  │
-│  │  dispatch · route · inventory · demand  +  runner     │  │
-│  └──────────────────────────┬────────────────────────────┘  │
-│                            │ SQLAlchemy ORM                 │
-│  ┌─────────────────────────▼──────────────────────────────┐ │
-│  │   SQLite (dev) / PostgreSQL (prod)                     │ │
-│  │   users · agents · tasks · shipments · vehicles ·      │ │
-│  │   events                                               │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+                        ┌──────────────────────────────┐
+                        │   Browser (vanilla JS SPA)   │
+                        │  Queue · Shipments · Agents  │
+                        └──────────────┬───────────────┘
+                                       │  JSON over HTTPS
+                                       │  Bearer JWT
+                        ┌──────────────▼───────────────┐
+                        │        FastAPI app           │
+                        │  ┌────────────────────────┐  │
+                        │  │ middleware             │  │
+                        │  │  CORS · security hdrs  │  │
+                        │  │  rate limit (in-proc)  │  │
+                        │  └───────────┬────────────┘  │
+                        │  ┌───────────▼────────────┐  │
+                        │  │ routers                │  │
+                        │  │  auth · registry       │  │
+                        │  │  tasks · observability │  │
+                        │  └───────────┬────────────┘  │
+                        │  ┌───────────▼────────────┐  │
+                        │  │ engine (pure logic)    │  │
+                        │  │  routing · triage      │  │
+                        │  │  dispatch · executor   │  │
+                        │  └───────────┬────────────┘  │
+                        └──────────────┼───────────────┘
+                                       │ SQLAlchemy 2.0
+                        ┌──────────────▼───────────────┐
+                        │  SQLite (dev) / Postgres 16  │
+                        │  users · agents · shipments  │
+                        │  tasks · runs · audit_events │
+                        └──────────────────────────────┘
 ```
 
-## Data flow
+## Layers, and why they are split this way
 
-1. **Auth** — user registers/logs in; server hashes the password with bcrypt (12 rounds) and issues a JWT (HS256, 24h expiry). Every subsequent request carries the token; `deps.get_current_user` decodes it and loads the user.
-2. **Agents** — a user creates agents of four kinds. Each kind maps to a pure function in `app/engine/logistics.py` that takes `(input_data, context)` and returns a result dict. No I/O inside the functions — that's what makes them unit-testable.
-3. **Tasks** — the user queues a task against an agent with JSON input. `POST /api/tasks/run` invokes the runner, which executes queued tasks oldest-first, records `started_at`/`finished_at`, stores the output (or the error), and writes an audit event.
-4. **Shipments** — creating a shipment triggers the dispatch agent synchronously: it picks the cheapest available vehicle whose capacity fits the weight, computes distance from the road-distance table, sets ETA (distance / 60 km/h) and cost (distance × cost-per-km), marks the vehicle `on_route`, and logs an event. `advance` moves the shipment through its lifecycle and frees the vehicle on delivery.
-5. **Dashboard** — aggregates counts across the user's own rows and returns the 10 most recent events.
+**`app/engine/` is pure.** No database session, no HTTP, no clock reads except
+where a timestamp is explicitly passed in. `routing.py`, `triage.py` and
+`dispatch.py` take plain values and return plain values. That is what makes 74
+tests run in under two seconds and what lets a finance analyst check the cost
+model without reading a router.
 
-## Agent context
+**`app/routers/` owns HTTP.** Status codes, role gates, and turning engine
+`ValueError`s into 422s. Routers do not contain business arithmetic.
 
-Agents receive a read-only `AgentContext` (fleet snapshot, recent shipments, inventory levels, demand history). This keeps the engine decoupled from the database — the runner builds the context from ORM rows, and tests build it from plain dicts.
+**`app/engine/executor.py` is the only place that writes a `Run`.** It is the
+error boundary: any exception inside a handler becomes a failed run with the
+traceback message stored, not a 500 to the caller. A dispatch of ten tasks
+where one fails still returns nine successes.
 
-## Distance model
+## Data model
 
-A curated table of inter-city road distances for the demo network (Karachi, Lahore, Islamabad, Peshawar, Quetta, Faisalabad, Multan, Hyderabad, Sukkur) with city-alias normalization. Unknown pairs fall back to a deterministic pseudo-distance so results are reproducible.
+```
+User ──owns──> Task ──has many──> Run
+                │                  │
+                ├──> Shipment      └── steps (JSON array)
+                ├──> Agent
+                └──> Task (depends_on_id, self-referential)
 
-## Security
+AuditEvent — append-only, references any entity by (type, id)
+```
 
-- Passwords: bcrypt, 12 rounds, never stored in plaintext
-- Tokens: JWT HS256 with 24h expiry; `sub` is the user id
-- Rate limiting: slowapi, 120 req/min per IP by default
-- Headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`
-- CORS: configurable origins via `CORS_ORIGINS`
-- Secrets: only via environment / `.env` — nothing hardcoded
-- Ownership: every query is scoped by `owner_id`; cross-user access returns 404
+`Task.depends_on_id` makes the queue a DAG rather than a flat list. A task is
+runnable only when its dependency is `succeeded` — not `running`, not `failed`.
+That distinction is enforced in `dispatch.is_runnable()` and covered by tests,
+because "the parent is still going" and "the parent died" need different
+responses from an operator.
+
+`Run.steps` is a JSON array of `{step, at, detail}`. Storing the trace on the
+run rather than in a separate table keeps the read path to one query, which is
+the right trade at this scale. If traces grow past a few hundred steps, move
+them to their own table and keep a summary on the run.
+
+## Data flow: one dispatch
+
+1. `POST /api/tasks/dispatch` loads every `queued` task.
+2. Each task's dependency status is resolved into a `QueueItem`.
+3. `order_queue()` filters to runnable items and sorts by priority, then age.
+4. For each item, `select_agent()` picks the least-loaded eligible agent of the
+   matching kind. Capacity is re-checked against in-batch load, so two tasks in
+   one batch cannot both take the last slot.
+5. `execute_task()` runs the handler, writes the step trace, and sets the task
+   to `succeeded` or `failed`.
+6. Anything not run gets an explicit `skipped` reason — "all agents at
+   capacity", "dependency is queued, not succeeded". Silence is not an option
+   here; an operator needs to know why their task did not move.
+
+## Cost model
+
+Freight cost is deterministic and documented so it can be argued with:
+
+```
+cost = BASE_FEE + (PER_KM_PER_KG × distance × weight × tier) × (1 + fuel)
+```
+
+- `BASE_FEE` = 250 PKR
+- `PER_KM_PER_KG` = 0.018
+- `fuel` = 11%
+- `tier` steps down at 50 / 500 / 5000 kg (1.00 / 0.92 / 0.84 / 0.78)
+
+Transit time uses distance-banded average speeds (22 / 45 / 58 / 52 km/h) plus
+3 hours of handling. Long hauls average faster than city runs because they are
+motorway-dominated; that is a modelling choice, stated rather than hidden.
 
 ## Scaling notes
 
-- **Stateless API** — the app holds no in-memory per-user state, so it scales horizontally behind a load balancer.
-- **Database** — swap `DATABASE_URL` to PostgreSQL for production; the ORM layer is identical. Add indexes on `owner_id` columns (already indexed) and consider partitioning `events` by time at scale.
-- **Task queue** — the synchronous runner is fine for a small operator. For high volume, move task execution to a background worker (Celery/ARQ) and keep the API for enqueueing; the engine functions are already pure and portable.
-- **Distance data** — replace the static table with a routing API (OSRM/Google) behind the same `road_distance_km` interface.
-- **Frontend** — the SPA is static; serve it from a CDN and keep the API on its own domain when scaling.
+**What is already right.** Stateless app process, all state in the database,
+engine logic pure and parallelisable, `Run` rows shaped for a worker queue.
+
+**What breaks first, in order:**
+
+1. **Rate limiting is per-process.** N uvicorn workers allow N× the configured
+   rate. Move to Redis with a sliding window before running more than one
+   worker behind real traffic.
+2. **Dispatch is synchronous.** A slow handler blocks the request. The fix is
+   to have `execute_task` enqueue to a worker (Celery/RQ/arq) and return the
+   `Run` in `running` state; the data model already supports this without
+   migration.
+3. **SQLite write contention.** Fine for a demo, not for concurrent dispatch.
+   Postgres via `docker-compose` is the intended production path.
+4. **No pagination cursors.** `limit` only. Add keyset pagination on
+   `created_at` before the tables get large.
+
+**What I would not change.** The pure engine. Keeping arithmetic out of the
+request path is what makes this testable, and testability is the whole product
+claim.
+
+## Security posture
+
+- bcrypt at cost 12, with a hard 72-byte rejection rather than silent truncation
+- JWT HS256, 24h expiry, secret from env only; production refuses to boot on
+  the development default
+- Self-registration always yields `viewer`; admin is granted out of band
+- Login returns an identical message for unknown-user and wrong-password
+- Role gates: `viewer` reads, `operator` writes, `admin` manages agents and
+  reads the audit log
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`
+
+**Known gaps, stated plainly:** no Content-Security-Policy (the SPA uses inline
+event handlers, so adding one requires refactoring `app.js` first), no
+refresh-token rotation, no account lockout after repeated failures, and the
+rate limiter is in-process as noted above.
