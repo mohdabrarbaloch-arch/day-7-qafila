@@ -1,47 +1,126 @@
-"""Shared fixtures — in-memory SQLite, seeded app, test client."""
+"""Test fixtures: an isolated in-memory database per test."""
+
+from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
 
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-os.environ["SECRET_KEY"] = "test-secret-key"
-os.environ["SEED_DEMO_DATA"] = "false"
-os.environ["RATE_LIMIT_PER_MINUTE"] = "10000"
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base, engine
-from app.main import app
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+os.environ.setdefault("DATABASE_URL", "sqlite://")
+os.environ.setdefault("SEED_DEMO_DATA", "false")
+os.environ.setdefault("JWT_SECRET", "test-secret-not-for-production")
+
+from app.database import Base, get_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import Agent, AgentKind, Role, Shipment, User  # noqa: E402
+from app.security import hash_password  # noqa: E402
 
 
-@pytest.fixture()
-def client():
+@pytest.fixture
+def db_session():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(bind=engine)
-    with TestClient(app) as c:
-        yield c
-    Base.metadata.drop_all(bind=engine)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    session = TestingSession()
+    try:
+        yield session
+    finally:
+        session.close()
+        Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture()
-def auth_headers(client):
-    r = client.post(
-        "/api/auth/register",
-        json={"email": "tester@qafila.pk", "name": "Tester", "password": "secret123"},
+@pytest.fixture
+def client(db_session):
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def admin_user(db_session) -> User:
+    user = User(
+        email="admin@test.pk",
+        password_hash=hash_password("test-password-123"),
+        role=Role.admin,
     )
-    assert r.status_code == 201, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
 
 
-@pytest.fixture()
-def demo_agent(client, auth_headers):
-    r = client.post(
-        "/api/agents",
-        headers=auth_headers,
-        json={"name": "Dispatcher", "kind": "dispatch", "description": "Test dispatcher"},
+@pytest.fixture
+def viewer_user(db_session) -> User:
+    user = User(
+        email="viewer@test.pk",
+        password_hash=hash_password("test-password-123"),
+        role=Role.viewer,
     )
-    assert r.status_code == 201, r.text
-    return r.json()
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def auth_headers(client, admin_user) -> dict:
+    res = client.post(
+        "/api/auth/login",
+        json={"email": "admin@test.pk", "password": "test-password-123"},
+    )
+    assert res.status_code == 200, res.text
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
+@pytest.fixture
+def viewer_headers(client, viewer_user) -> dict:
+    res = client.post(
+        "/api/auth/login",
+        json={"email": "viewer@test.pk", "password": "test-password-123"},
+    )
+    assert res.status_code == 200, res.text
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
+@pytest.fixture
+def seeded(db_session):
+    """One agent of each kind plus a shipment, for dispatch tests."""
+    agents = [
+        Agent(name="Tarmeem", kind=AgentKind.dispatcher, max_concurrency=2),
+        Agent(name="Raasta", kind=AgentKind.route_optimizer, max_concurrency=1),
+        Agent(name="Ginti", kind=AgentKind.inventory_auditor, max_concurrency=1),
+        Agent(name="Nigraan", kind=AgentKind.exception_handler, max_concurrency=2),
+    ]
+    shipment = Shipment(
+        reference="QFL-TEST-1",
+        origin_city="Karachi",
+        destination_city="Lahore",
+        weight_kg=320.0,
+        distance_km=1240.0,
+        deadline_hours=30.0,
+    )
+    db_session.add_all([*agents, shipment])
+    db_session.commit()
+    for agent in agents:
+        db_session.refresh(agent)
+    db_session.refresh(shipment)
+    return {"agents": agents, "shipment": shipment}
