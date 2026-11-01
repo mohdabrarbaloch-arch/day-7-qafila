@@ -1,151 +1,146 @@
-"""Pydantic schemas for request/response validation."""
+"""Pydantic request/response schemas.
+
+Field bounds here are the single source of truth for input validation — the
+routers do not re-check them.
+"""
+
+from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from .models import AgentKind, Role, RunStatus, ShipmentStatus, TaskStatus
 
 
-# ---------- Auth ----------
+class ORMModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- auth -----------------------------------------------------------------
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
-    name: str = Field(min_length=2, max_length=120)
-    password: str = Field(min_length=8, max_length=128)
-
-    @field_validator("password")
-    @classmethod
-    def password_strength(cls, v: str) -> str:
-        if not any(c.isdigit() for c in v):
-            raise ValueError("password must contain at least one digit")
-        if not any(c.isalpha() for c in v):
-            raise ValueError("password must contain at least one letter")
-        return v
+    password: str = Field(min_length=8, max_length=72)
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=1, max_length=72)
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    user: "UserOut"
+    role: Role
 
 
-class UserOut(BaseModel):
-    id: int
+class UserOut(ORMModel):
+    id: str
     email: EmailStr
-    name: str
-    role: str
+    role: Role
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+
+# --- agents ---------------------------------------------------------------
 
 
-# ---------- Agents ----------
 class AgentCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
-    kind: str = Field(pattern="^(dispatch|route|inventory|demand)$")
-    description: str = ""
-    config: dict[str, Any] = Field(default_factory=dict)
+    kind: AgentKind
+    description: str = Field(default="", max_length=2000)
+    max_concurrency: int = Field(default=2, ge=1, le=16)
 
 
-class AgentUpdate(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    status: str | None = Field(default=None, pattern="^(idle|running|paused)$")
-    config: dict[str, Any] | None = None
-
-
-class AgentOut(BaseModel):
-    id: int
+class AgentOut(ORMModel):
+    id: str
     name: str
-    kind: str
+    kind: AgentKind
     description: str
-    status: str
-    config: dict[str, Any]
+    max_concurrency: int
+    enabled: bool
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+
+# --- shipments ------------------------------------------------------------
 
 
-# ---------- Tasks ----------
-class TaskCreate(BaseModel):
-    agent_id: int
-    title: str = Field(min_length=2, max_length=200)
-    input_data: dict[str, Any] = Field(default_factory=dict)
-
-
-class TaskOut(BaseModel):
-    id: int
-    agent_id: int
-    title: str
-    status: str
-    input_data: dict[str, Any]
-    output_data: dict[str, Any]
-    error: str
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-
-    model_config = {"from_attributes": True}
-
-
-# ---------- Fleet ----------
-class VehicleCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
-    vehicle_type: str = Field(pattern="^(bike|van|truck)$")
-    capacity_kg: float = Field(gt=0, le=100_000)
-    cost_per_km: float = Field(ge=0, le=10_000)
-
-
-class VehicleOut(BaseModel):
-    id: int
-    name: str
-    vehicle_type: str
-    capacity_kg: float
-    status: str
-    location: str
-    cost_per_km: float
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-# ---------- Shipments ----------
 class ShipmentCreate(BaseModel):
-    origin: str = Field(min_length=2, max_length=200)
-    destination: str = Field(min_length=2, max_length=200)
-    weight_kg: float = Field(gt=0, le=100_000)
+    reference: str = Field(min_length=3, max_length=40, pattern=r"^[A-Za-z0-9\-_]+$")
+    origin_city: str = Field(min_length=2, max_length=80)
+    destination_city: str = Field(min_length=2, max_length=80)
+    weight_kg: float = Field(gt=0, le=40_000)
+    distance_km: float = Field(gt=0, le=20_000)
+    deadline_hours: float = Field(default=48.0, gt=0, le=720)
 
 
-class ShipmentOut(BaseModel):
-    id: int
-    tracking_code: str
-    origin: str
-    destination: str
+class ShipmentOut(ORMModel):
+    id: str
+    reference: str
+    origin_city: str
+    destination_city: str
     weight_kg: float
-    status: str
-    vehicle_id: int | None
-    assigned_agent_id: int | None
-    eta_hours: float
-    cost: float
+    distance_km: float
+    status: ShipmentStatus
+    deadline_hours: float
+    created_at: datetime
+
+
+# --- tasks ----------------------------------------------------------------
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=200)
+    kind: AgentKind
+    priority: int = Field(default=5, ge=1, le=10)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    shipment_id: str | None = None
+    depends_on_id: str | None = None
+
+
+class TaskOut(ORMModel):
+    id: str
+    title: str
+    kind: AgentKind
+    status: TaskStatus
+    priority: int
+    payload: dict[str, Any]
+    shipment_id: str | None
+    agent_id: str | None
+    depends_on_id: str | None
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
+
+# --- runs -----------------------------------------------------------------
 
 
-# ---------- Dashboard ----------
-class DashboardOut(BaseModel):
-    shipments_total: int
-    shipments_in_transit: int
-    shipments_delivered: int
-    agents_total: int
-    agents_running: int
-    tasks_queued: int
-    tasks_done: int
-    fleet_available: int
-    fleet_on_route: int
-    recent_events: list[dict[str, Any]]
+class RunOut(ORMModel):
+    id: str
+    task_id: str
+    agent_id: str
+    status: RunStatus
+    steps: list[dict[str, Any]]
+    tokens_used: int
+    cost_usd: float
+    error: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class DispatchResult(BaseModel):
+    dispatched: list[RunOut]
+    skipped: list[dict[str, str]]
+    message: str
+
+
+class MetricsOut(BaseModel):
+    tasks_by_status: dict[str, int]
+    runs_total: int
+    runs_failed: int
+    tokens_used: int
+    cost_usd: float
+    agents_busy: dict[str, int]
+    shipments_by_status: dict[str, int]
